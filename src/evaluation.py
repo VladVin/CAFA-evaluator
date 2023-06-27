@@ -33,7 +33,7 @@ def compute_s(ru, mi):
 
 def compute_metrics_(tau_arr, g, pred, toi, n_gt, wn_gt=None, ic_arr=None):
 
-    metrics = np.zeros((len(tau_arr), 7), dtype='float')  # cov, pr, rc, wpr, wrc, ru, mi
+    metrics = np.zeros((len(tau_arr), 3), dtype='float')  # cov, wpr, wrc
 
     for i, tau in enumerate(tau_arr):
 
@@ -49,28 +49,15 @@ def compute_metrics_(tau_arr, g, pred, toi, n_gt, wn_gt=None, ic_arr=None):
         n_pred = p.sum(axis=1)
         n_intersection = intersection.sum(axis=1)
 
-        # Precision, recall
-        metrics[i, 1] = np.divide(n_intersection, n_pred, out=np.zeros_like(n_intersection, dtype='float'),
-                                  where=n_pred > 0).sum()
-        metrics[i, 2] = np.divide(n_intersection, n_gt, out=np.zeros_like(n_gt, dtype='float'), where=n_gt > 0).sum()
-
         if ic_arr is not None:
-            # Terms subsets
-            remaining = np.logical_and(np.logical_not(p), g)  # FN --> not predicted but in the ground truth
-            mis = np.logical_and(p, np.logical_not(g))  # FP --> predicted but not in the ground truth
-
             # Weighted precision, recall
             wn_pred = (p * ic_arr[toi]).sum(axis=1)
             wn_intersection = (intersection * ic_arr[toi]).sum(axis=1)
 
-            metrics[i, 3] = np.divide(wn_intersection, wn_pred, out=np.zeros_like(n_intersection, dtype='float'),
+            metrics[i, 1] = np.divide(wn_intersection, wn_pred, out=np.zeros_like(n_intersection, dtype='float'),
                                       where=n_pred > 0).sum()
-            metrics[i, 4] = np.divide(wn_intersection, wn_gt, out=np.zeros_like(n_intersection, dtype='float'),
+            metrics[i, 2] = np.divide(wn_intersection, wn_gt, out=np.zeros_like(n_intersection, dtype='float'),
                                       where=n_gt > 0).sum()
-
-            # Misinformation, remaining uncertainty
-            metrics[i, 5] = (remaining * ic_arr[toi]).sum(axis=1).sum()
-            metrics[i, 6] = (mis * ic_arr[toi]).sum(axis=1).sum()
     return metrics
 
 
@@ -95,7 +82,7 @@ def compute_metrics(pred, gt, toi, tau_arr, ic_arr=None, n_cpu=0):
     with mp.Pool(processes=n_cpu) as pool:
         metrics = np.concatenate(pool.starmap(compute_metrics_, arg_lists), axis=0)
 
-    return pd.DataFrame(metrics, columns=["cov", "pr", "rc", "wpr", "wrc", "ru", "mi"])
+    return pd.DataFrame(metrics, columns=["cov", "wpr", "wrc"])
 
 
 def evaluate_prediction(prediction, gt, ontologies, tau_arr, normalization='cafa', n_cpu=0):
@@ -110,7 +97,7 @@ def evaluate_prediction(prediction, gt, ontologies, tau_arr, normalization='cafa
         # cov, pr, rc, wpr, wrc, ru, mi
         metrics = compute_metrics(p, gt[ns], ont.toi, tau_arr, ont.ia, n_cpu)
 
-        for column in ["pr", "rc", "wpr", "wrc", "ru", "mi"]:
+        for column in ["wpr", "wrc"]:
             if normalization == 'gt' or (column in ["rc", "wrc", "ru", "mi"] and normalization == 'cafa'):
                 metrics[column] = np.divide(metrics[column], ne, out=np.zeros_like(metrics[column], dtype='float'), where=ne > 0)
             else:
@@ -119,9 +106,7 @@ def evaluate_prediction(prediction, gt, ontologies, tau_arr, normalization='cafa
         metrics['ns'] = [ns] * len(tau_arr)
         metrics['tau'] = tau_arr
         metrics['cov'] = np.divide(metrics['cov'], ne, out=np.zeros_like(metrics['cov'], dtype='float'), where=ne > 0)
-        metrics['f'] = compute_f(metrics['pr'], metrics['rc'])
         metrics['wf'] = compute_f(metrics['wpr'], metrics['wrc'])
-        metrics['s'] = compute_s(metrics['ru'], metrics['mi'])
 
         dfs.append(metrics)
 
