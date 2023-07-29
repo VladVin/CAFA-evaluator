@@ -33,7 +33,7 @@ def compute_s(ru, mi):
 
 def compute_metrics_(tau_arr, g, pred, toi, n_gt, wn_gt=None, ic_arr=None):
 
-    metrics = np.zeros((len(tau_arr), 3), dtype='float')  # cov, wpr, wrc
+    metrics = np.zeros((len(tau_arr), 3), dtype='float32')  # cov, wpr, wrc
 
     for i, tau in enumerate(tau_arr):
 
@@ -54,12 +54,11 @@ def compute_metrics_(tau_arr, g, pred, toi, n_gt, wn_gt=None, ic_arr=None):
             wn_pred = (p * ic_arr[toi]).sum(axis=1)
             wn_intersection = (intersection * ic_arr[toi]).sum(axis=1)
 
-            metrics[i, 1] = np.divide(wn_intersection, wn_pred, out=np.zeros_like(n_intersection, dtype='float'),
+            metrics[i, 1] = np.divide(wn_intersection, wn_pred, out=np.zeros_like(n_intersection, dtype='float32'),
                                       where=n_pred > 0).sum()
-            metrics[i, 2] = np.divide(wn_intersection, wn_gt, out=np.zeros_like(n_intersection, dtype='float'),
+            metrics[i, 2] = np.divide(wn_intersection, wn_gt, out=np.zeros_like(n_intersection, dtype='float32'),
                                       where=n_gt > 0).sum()
     return metrics
-
 
 def compute_metrics(pred, gt, toi, tau_arr, ic_arr=None, n_cpu=0):
     """
@@ -81,6 +80,9 @@ def compute_metrics(pred, gt, toi, tau_arr, ic_arr=None, n_cpu=0):
     arg_lists = [[tau_arr, g, pred, toi, n_gt, wn_gt, ic_arr] for tau_arr in np.array_split(tau_arr, n_cpu)]
     with mp.Pool(processes=n_cpu) as pool:
         metrics = np.concatenate(pool.starmap(compute_metrics_, arg_lists), axis=0)
+    # metrics = compute_metrics_(tau_arr, g, pred, toi, n_gt, wn_gt, ic_arr)
+
+    print(metrics.shape)
 
     return pd.DataFrame(metrics, columns=["cov", "wpr", "wrc"])
 
@@ -94,18 +96,18 @@ def evaluate_prediction(prediction, gt, ontologies, tau_arr, normalization='cafa
 
         ont = [o for o in ontologies if o.namespace == ns][0]
 
-        # cov, pr, rc, wpr, wrc, ru, mi
+        # cov, wpr, wrc
         metrics = compute_metrics(p, gt[ns], ont.toi, tau_arr, ont.ia, n_cpu)
 
         for column in ["wpr", "wrc"]:
             if normalization == 'gt' or (column in ["rc", "wrc", "ru", "mi"] and normalization == 'cafa'):
-                metrics[column] = np.divide(metrics[column], ne, out=np.zeros_like(metrics[column], dtype='float'), where=ne > 0)
+                metrics[column] = np.divide(metrics[column], ne, out=np.zeros_like(metrics[column], dtype='float32'), where=ne > 0)
             else:
-                metrics[column] = np.divide(metrics[column], metrics["cov"], out=np.zeros_like(metrics[column], dtype='float'), where=metrics["cov"] > 0)
+                metrics[column] = np.divide(metrics[column], metrics["cov"], out=np.zeros_like(metrics[column], dtype='float32'), where=metrics["cov"] > 0)
 
         metrics['ns'] = [ns] * len(tau_arr)
         metrics['tau'] = tau_arr
-        metrics['cov'] = np.divide(metrics['cov'], ne, out=np.zeros_like(metrics['cov'], dtype='float'), where=ne > 0)
+        metrics['cov'] = np.divide(metrics['cov'], ne, out=np.zeros_like(metrics['cov'], dtype='float32'), where=ne > 0)
         metrics['wf'] = compute_f(metrics['wpr'], metrics['wrc'])
 
         dfs.append(metrics)
