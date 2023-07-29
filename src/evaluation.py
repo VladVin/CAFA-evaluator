@@ -31,7 +31,7 @@ def compute_s(ru, mi):
     # return np.where(np.isnan(ru), mi, np.sqrt(ru + np.nan_to_num(mi)))
 
 
-def compute_metrics_(tau_arr, g, pred, toi, n_gt):
+def compute_metrics_w_(tau_arr, g, pred, toi, n_gt, ic_arr):
 
     metrics = np.zeros((len(tau_arr), 3), dtype='float32')  # cov, wpr, wrc
 
@@ -45,22 +45,19 @@ def compute_metrics_(tau_arr, g, pred, toi, n_gt):
         # Terms subsets
         intersection = np.logical_and(p, g)  # TP
 
-        # Subsets size
-        n_pred = p.sum(axis=1)
-        n_intersection = intersection.sum(axis=1)
+        # Weighted precision, recall
+        n_pred = (p * ic_arr[toi]).sum(axis=1)
+        n_intersection = (intersection * ic_arr[toi]).sum(axis=1)
 
-        if ic_arr is not None:
-            # Weighted precision, recall
-            wn_pred = (p * ic_arr[toi]).sum(axis=1)
-            wn_intersection = (intersection * ic_arr[toi]).sum(axis=1)
+        metrics[i, 1] = np.divide(n_intersection, n_pred, out=np.zeros_like(n_intersection, dtype='float32'),
+                                  where=n_pred > 0).sum()
+        metrics[i, 2] = np.divide(n_intersection, n_gt, out=np.zeros_like(n_intersection, dtype='float32'),
+                                  where=n_gt > 0).sum()
 
-            metrics[i, 1] = np.divide(wn_intersection, wn_pred, out=np.zeros_like(n_intersection, dtype='float32'),
-                                      where=n_pred > 0).sum()
-            metrics[i, 2] = np.divide(wn_intersection, wn_gt, out=np.zeros_like(n_intersection, dtype='float32'),
-                                      where=n_gt > 0).sum()
     return metrics
 
-def compute_metrics(pred, gt, toi, tau_arr, ic_arr=None, n_cpu=0):
+
+def compute_metrics(pred, gt, tau_arr, toi, toi_ia, ic_arr, n_cpu=0):
     """
     Takes the prediction and the ground truth and for each threshold in tau_arr
     calculates the confusion matrix and returns the coverage,
@@ -71,16 +68,15 @@ def compute_metrics(pred, gt, toi, tau_arr, ic_arr=None, n_cpu=0):
     if n_cpu == 0:
         n_cpu = mp.cpu_count()
 
-    g = gt.matrix[:, toi]
-    n_gt = g.sum(axis=1)
-    arg_lists = [[tau_arr, g, pred, toi, n_gt] for tau_arr in np.array_split(tau_arr, n_cpu)]
-    with mp.Pool(processes=n_cpu) as pool:
-        metrics = np.concatenate(pool.starmap(compute_metrics_, arg_lists), axis=0)
-    # metrics = compute_metrics_(tau_arr, g, pred, toi, n_gt, wn_gt, ic_arr)
+    if ic_arr is not None:
+        g = gt.matrix[:, toi_ia]
+        n_gt = (g * ic_arr[toi_ia]).sum(axis=1)
+        arg_lists = [[tau_arr, g, pred, toi_ia, n_gt, ic_arr] for tau_arr in np.array_split(tau_arr, n_cpu)]
+        with mp.Pool(processes=n_cpu) as pool:
+            metrics = np.concatenate(pool.starmap(compute_metrics_w_, arg_lists), axis=0)
+        columns = ["wcov", "wpr", "wrc"]
 
-    print(metrics.shape)
-
-    return pd.DataFrame(metrics, columns=["cov", "wpr", "wrc"])
+    return pd.DataFrame(metrics, columns=columns)
 
 
 def evaluate_prediction(prediction, gt, ontologies, tau_arr, normalization='cafa', n_cpu=0):
@@ -90,19 +86,36 @@ def evaluate_prediction(prediction, gt, ontologies, tau_arr, normalization='cafa
         ns = p.namespace
         ont = [o for o in ontologies if o.namespace == ns][0]
 
-        # cov, wpr, wrc
-        metrics = compute_metrics(p, gt[ns], ont.toi, tau_arr, ont.ia, n_cpu)
+        # Number of predicted proteins
+        ne = np.full(len(tau_arr), gt[ns].matrix[:, ont.toi].shape[0])
+
+        # wcov, wpr, wrc
+        metrics = compute_metrics(p, gt[ns], tau_arr, ont.toi, ont.toi_ia, ont.ia, n_cpu)
 
         for column in ["wpr", "wrc"]:
-            if normalization == 'gt' or (column in ["rc", "wrc", "ru", "mi"] and normalization == 'cafa'):
-                metrics[column] = np.divide(metrics[column], ne, out=np.zeros_like(metrics[column], dtype='float32'), where=ne > 0)
-            else:
-                metrics[column] = np.divide(metrics[column], metrics["cov"], out=np.zeros_like(metrics[column], dtype='float32'), where=metrics["cov"] > 0)
+            if column in metrics.columns:
+                if normalization == 'gt' or (column in ["rc", "wrc", "ru", "mi"] and normalization == 'cafa'):
+                    # Normalize by gt
+                    metrics[column] = np.divide(metrics[column], ne,
+                                                out=np.zeros_like(metrics[column], dtype='float32'), where=ne > 0)
+                else:
+                    # Normalize by pred (cov)
+                    if column in ["pr", "rc"]:
+                        # Normalize by cov
+                        metrics[column] = np.divide(metrics[column], metrics["cov"],
+                                                    out=np.zeros_like(metrics[column], dtype='float32'), where=metrics["cov"] > 0)
+                    else:
+                        # Normalize by weighted cov
+                        metrics[column] = np.divide(metrics[column], metrics["wcov"],
+                                                    out=np.zeros_like(metrics[column], dtype='float32'), where=metrics["wcov"] > 0)
 
         metrics['ns'] = [ns] * len(tau_arr)
         metrics['tau'] = tau_arr
-        metrics['cov'] = np.divide(metrics['cov'], ne, out=np.zeros_like(metrics['cov'], dtype='float32'), where=ne > 0)
-        metrics['wf'] = compute_f(metrics['wpr'], metrics['wrc'])
+
+        if ont.ia is not None:
+            ne = np.full(len(tau_arr), gt[ns].matrix[:, ont.toi_ia].shape[0])
+            metrics['wcov'] = np.divide(metrics['wcov'], ne, out=np.zeros_like(metrics['wcov'], dtype='float32'), where=ne > 0)
+            metrics['wf'] = compute_f(metrics['wpr'], metrics['wrc'])
 
         dfs.append(metrics)
 
