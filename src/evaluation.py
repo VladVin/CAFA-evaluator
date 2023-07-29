@@ -31,7 +31,7 @@ def compute_s(ru, mi):
     # return np.where(np.isnan(ru), mi, np.sqrt(ru + np.nan_to_num(mi)))
 
 
-def compute_metrics_(tau_arr, g, pred, toi, n_gt, wn_gt=None, ic_arr=None):
+def compute_metrics_(tau_arr, g, pred, toi, n_gt):
 
     metrics = np.zeros((len(tau_arr), 3), dtype='float32')  # cov, wpr, wrc
 
@@ -39,7 +39,7 @@ def compute_metrics_(tau_arr, g, pred, toi, n_gt, wn_gt=None, ic_arr=None):
 
         p = solidify_prediction(pred.matrix[:, toi], tau)
 
-        # number of proteins with at least one term predicted with score >= tau
+        # Coverage, number of proteins with at least one term predicted with score >= tau
         metrics[i, 0] = (p.sum(axis=1) > 0).sum()
 
         # Terms subsets
@@ -67,17 +67,13 @@ def compute_metrics(pred, gt, toi, tau_arr, ic_arr=None, n_cpu=0):
     precision, recall, remaining uncertainty and misinformation.
     Toi is the list of terms (indexes) to be considered
     """
-    g = gt.matrix[:, toi]
-    n_gt = g.sum(axis=1)
-    wn_gt = None
-    if ic_arr is not None:
-        wn_gt = (g * ic_arr[toi]).sum(axis=1)
-
     # Parallelization
     if n_cpu == 0:
         n_cpu = mp.cpu_count()
 
-    arg_lists = [[tau_arr, g, pred, toi, n_gt, wn_gt, ic_arr] for tau_arr in np.array_split(tau_arr, n_cpu)]
+    g = gt.matrix[:, toi]
+    n_gt = g.sum(axis=1)
+    arg_lists = [[tau_arr, g, pred, toi, n_gt] for tau_arr in np.array_split(tau_arr, n_cpu)]
     with mp.Pool(processes=n_cpu) as pool:
         metrics = np.concatenate(pool.starmap(compute_metrics_, arg_lists), axis=0)
     # metrics = compute_metrics_(tau_arr, g, pred, toi, n_gt, wn_gt, ic_arr)
@@ -92,8 +88,6 @@ def evaluate_prediction(prediction, gt, ontologies, tau_arr, normalization='cafa
     dfs = []
     for p in prediction:
         ns = p.namespace
-        ne = np.full(len(tau_arr), gt[ns].matrix.shape[0])
-
         ont = [o for o in ontologies if o.namespace == ns][0]
 
         # cov, wpr, wrc

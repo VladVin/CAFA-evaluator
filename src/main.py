@@ -30,7 +30,7 @@ if __name__ == '__main__':
                         help='Ancestor propagation strategy. i) Propagate the max score of the traversed subgraph '
                              'iteratively (max); ii) Propagate with max until a different score is found (fill)')
     parser.add_argument('-th_step', type=float, default=0.01,
-                        help='Threshold step size in the range [0, 1]. A smaller step, means more calculation.')
+                        help='Threshold step size in the range [0, 1). A smaller step, means more calculation.')
     parser.add_argument('-max_terms', type=int, default=None,
                         help='Number of terms for protein and namespace to consider in the evaluation.')
     parser.add_argument('-threads', type=int, default=4,
@@ -42,7 +42,7 @@ if __name__ == '__main__':
     # Create output folder here in order to store the log file
     out_folder = os.path.normpath(args.out_dir) + "/"
     if not os.path.isdir(out_folder):
-        os.mkdir(out_folder)
+        os.makedirs(out_folder)
 
     # Set the logger
     logFormatter = logging.Formatter("%(asctime)s [%(levelname)-5.5s] %(message)s")
@@ -81,7 +81,7 @@ if __name__ == '__main__':
     gt = gt_parser(args.gt_file, ontologies)
 
     # Tau array, used to compute metrics at different score thresholds
-    tau_arr = np.arange(0.01, 1, args.th_step)
+    tau_arr = np.arange(args.th_step, 1, args.th_step)
 
     # Parse prediction files and perform evaluation
     dfs = []
