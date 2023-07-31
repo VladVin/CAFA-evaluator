@@ -100,7 +100,7 @@ def gt_parser(gt_file, ontologies):
     return gts
 
 
-def pred_parser(pred_file, ontologies, gts, prop_mode, max_terms=None):
+def pred_parser(pred_matrix, protein_ids, terms, ontologies, gts, prop_mode):
     """
     Parse a prediction file and returns a list of prediction objects, one for each namespace.
     If a predicted is predicted multiple times for the same target, it stores the max.
@@ -112,24 +112,23 @@ def pred_parser(pred_file, ontologies, gts, prop_mode, max_terms=None):
     ns_dict = {}  # {namespace: term}
     onts = {ont.namespace: ont for ont in ontologies}
     for ns in gts:
-        matrix[ns] = np.zeros(gts[ns].matrix.shape, dtype='float')
+        matrix[ns] = np.zeros(gts[ns].matrix.shape, dtype='float32')
         ids[ns] = {}
         for term in onts[ns].terms_dict:
             ns_dict[term] = ns
 
-    with open(pred_file) as f:
-        for line in f:
-            line = line.strip().split()
-            if line and len(line) > 2:
-                p_id, term_id, prob = line[:3]
-                ns = ns_dict.get(term_id)
-                if ns in gts and p_id in gts[ns].ids:
-                    i = gts[ns].ids[p_id]
-                    if max_terms is None or np.count_nonzero(matrix[ns][i]) <= max_terms:
-                        j = onts[ns].terms_dict.get(term_id)['index']
-                        ids[ns][p_id] = i
-                        matrix[ns][i, j] = max(matrix[ns][i, j], float(prob))
-
+    terms_nss = np.array([ns_dict.get(term) for term in terms])
+    for ns in gts:
+        mask = terms_nss == ns
+        ns_preds = pred_matrix[:, mask]
+        ns_terms = terms[mask]
+        terms_index = np.array([onts[ns].terms_dict.get(term_id)['index'] for term_id in ns_terms])
+        
+        ids[ns] = {p_id: gts[ns].ids[p_id] for p_id in protein_ids if p_id in gts[ns].ids}
+        proteins_index = np.array(list(ids[ns].values()))
+        mask = np.isin(protein_ids, list(ids[ns].keys()))
+        matrix[ns][proteins_index[:, np.newaxis], terms_index] = ns_preds[mask, :]
+    
     predictions = []
     for ns in ids:
         if ids[ns]:
@@ -138,7 +137,7 @@ def pred_parser(pred_file, ontologies, gts, prop_mode, max_terms=None):
             logging.debug("pred matrix {} {} ".format(ns, matrix))
 
             predictions.append(Prediction(ids[ns], matrix[ns], len(ids[ns]), ns))
-            logging.info("Prediction: {}, {}, proteins {}".format(pred_file, ns, len(ids[ns])))
+            logging.info("{}, proteins {}".format(ns, len(ids[ns])))
 
     if not predictions:
         # raise Exception("Empty prediction, check format")
